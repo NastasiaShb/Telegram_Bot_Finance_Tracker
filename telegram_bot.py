@@ -13,13 +13,19 @@ from telegram.ext import (
     ContextTypes,
 )
 
-
 load_dotenv()
 
 token = os.getenv("TELEGRAM_TOKEN")
+csv_file = "finance_data.csv"
+
+if os.path.exists(csv_file):
+    data = pd.read_csv(csv_file, parse_dates=["Date"])
+else:
+    data = pd.DataFrame(columns=["Date", "Category", "Amount", "Description", "Type"])
 
 
-data = pd.DataFrame(columns=["Date", "Category", "Amount", "Description", "Type"])
+def save_data():
+    data.to_csv(csv_file, index=False)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -54,12 +60,15 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global data
     user_data = update.message.text.split(", ")
+
     if len(user_data) == 5:
         try:
             new_entry = pd.DataFrame(
                 [
                     [
-                        user_data[0],
+                        pd.to_datetime(
+                            user_data[0], format="%Y-%m-%d", errors="coerce"
+                        ),
                         user_data[1],
                         float(user_data[2]),
                         user_data[3],
@@ -68,13 +77,14 @@ async def add_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ],
                 columns=data.columns,
             )
-            new_entry["Date"] = pd.to_datetime(new_entry["Date"], errors="coerce")
+            if new_entry["Date"].isna().any():
+                raise ValueError("Неверный формат даты.")
+
             data = pd.concat([data, new_entry], ignore_index=True)
+            save_data()
             await update.message.reply_text("Данные успешно добавлены!")
-        except ValueError:
-            await update.message.reply_text(
-                "Ошибка: неверный формат суммы. Пожалуйста, введите числовое значение."
-            )
+        except ValueError as e:
+            await update.message.reply_text(f"Ошибка: {e}")
     else:
         await update.message.reply_text("Неверный формат. Пожалуйста, повторите ввод.")
 
@@ -104,7 +114,7 @@ async def generate_report(query, period):
 
 async def visualize_data(query):
     global data
-    if data["Amount"].isna().all():
+    if data.empty or data["Amount"].isna().all():
         await query.edit_message_text(text="Нет данных для визуализации.")
         return
 
@@ -129,6 +139,7 @@ async def visualize_data(query):
 async def reset_data(query):
     global data
     data = pd.DataFrame(columns=["Date", "Category", "Amount", "Description", "Type"])
+    save_data()
     await query.edit_message_text(text="Все данные сброшены!")
 
 
